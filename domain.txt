@@ -1,0 +1,4 @@
+s1.hdslb.com
+detail.zol.com.cn
+zz.bdstatic.com
+dfs01.nn.com

@@ -1,0 +1,4 @@
+{
+    "scan_interval_seconds": 10,
+    "dns_server": "192.168.1.1"
+} 

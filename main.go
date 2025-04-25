@@ -52,7 +52,7 @@ func logf(level, format string, args ...interface{}) {
 		return
 	}
 
-	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05.000")
 	fmt.Printf("[%s] [%s] %s\n", timestamp, level, fmt.Sprintf(format, args...))
 }
 
@@ -310,7 +310,7 @@ func scanDomains(config *Config) ([]PingResult, error) {
 	}
 
 	var results []PingResult
-	timestamp := time.Now()
+	timestamp := time.Now().UTC()
 
 	logf(LogInfo, "Starting scan...")
 	logf(LogInfo, "Loaded domains: %v", domains)

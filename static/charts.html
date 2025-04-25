@@ -259,6 +259,7 @@
                     break;
             }
             
+            // 转换为 UTC 时间
             return {
                 start: start.toISOString(),
                 end: now.toISOString()
@@ -370,7 +371,7 @@
                     tooltip: {
                         trigger: 'axis',
                         formatter: function(params) {
-                            const time = new Date(params[0].axisValue).toLocaleString();
+                            const time = new Date(params[0].axisValue).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
                             return `${time}<br/>不可访问IP数: ${params[0].value}`;
                         }
                     },
@@ -387,9 +388,14 @@
                             formatter: function(value) {
                                 const date = new Date(value);
                                 if (currentTimeRange === '1h') {
-                                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    return date.toLocaleString('zh-CN', { 
+                                        timeZone: 'Asia/Shanghai',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    });
                                 } else {
-                                    return date.toLocaleString([], { 
+                                    return date.toLocaleString('zh-CN', { 
+                                        timeZone: 'Asia/Shanghai',
                                         month: '2-digit',
                                         day: '2-digit',
                                         hour: '2-digit',
@@ -397,7 +403,7 @@
                                     });
                                 }
                             },
-                            interval: currentTimeRange === '1h' ? 4 : 'auto' // 1小时时每5分钟显示一个标签
+                            interval: currentTimeRange === '1h' ? 4 : 'auto'
                         }
                     },
                     yAxis: {
@@ -492,7 +498,7 @@
                 const tbody = document.getElementById('failedIPsTableBody');
                 tbody.innerHTML = data.map(item => `
                     <tr>
-                        <td>${new Date(item.Timestamp).toLocaleString()}</td>
+                        <td>${new Date(item.Timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</td>
                         <td>${item.Domain}</td>
                         <td>${item.IP}</td>
                         <td>${item.RTT ? (item.RTT / 1000000).toFixed(2) : '-'}</td>

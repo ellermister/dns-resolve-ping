@@ -355,6 +355,19 @@ func scanDomains(config *Config) ([]PingResult, error) {
 	return results, nil
 }
 
+func getDatabasePath() string {
+	// 判断是否是docker容器
+	if os.Getenv("DOCKER_CONTAINER") == "true" {
+		// 检测目录是否存在
+		if _, err := os.Stat("/data"); os.IsNotExist(err) {
+			logf(LogError, "Database directory does not exist: /data")
+			return "log.db"
+		}
+		return "/data/log.db"
+	}
+	return "log.db"
+}
+
 func main() {
 	const configFile = "config.json"
 
@@ -365,7 +378,7 @@ func main() {
 		return
 	}
 
-	db, err := gorm.Open(sqlite.Open("log.db"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(getDatabasePath()), &gorm.Config{})
 	if err != nil {
 		logf(LogError, "Failed to connect database: %v", err)
 		return

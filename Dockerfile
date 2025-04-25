@@ -46,6 +46,9 @@ COPY --chown=appuser:appuser static/ ./static/
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
+ENV DOCKER_CONTAINER=true
+
+VOLUME /data
 
 # 切换到非 root 用户
 USER appuser

@@ -13,18 +13,54 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+// 日志级别
+const (
+	LogDebug   = "DEBUG"
+	LogInfo    = "INFO"
+	LogWarning = "WARN"
+	LogError   = "ERROR"
+)
+
+// 日志级别权重
+var logLevelWeight = map[string]int{
+	LogDebug:   0,
+	LogInfo:    1,
+	LogWarning: 2,
+	LogError:   3,
+}
 
 type Config struct {
 	ScanIntervalSeconds int    `json:"scan_interval_seconds"`
 	DNSServer           string `json:"dns_server"`
+	LogLevel            string `json:"log_level"`
 }
+
+// 输出格式化日志
+func logf(level, format string, args ...interface{}) {
+	// 检查日志级别是否应该被输出
+	configLevel := currentConfig.LogLevel
+	if logLevelWeight[level] < logLevelWeight[configLevel] {
+		return
+	}
+
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	fmt.Printf("[%s] [%s] %s\n", timestamp, level, fmt.Sprintf(format, args...))
+}
+
+// 全局配置变量
+var currentConfig *Config
 
 func loadConfig(filename string) (*Config, error) {
 	// Default configuration
 	config := &Config{
 		ScanIntervalSeconds: 10,
 		DNSServer:           "192.168.1.1",
+		LogLevel:            LogInfo, // 默认日志级别为 INFO
 	}
 
 	// Try to read config file
@@ -36,7 +72,7 @@ func loadConfig(filename string) (*Config, error) {
 			if err := os.WriteFile(filename, defaultConfig, 0644); err != nil {
 				return nil, fmt.Errorf("failed to create default config file: %v", err)
 			}
-			fmt.Printf("Created default config file: %s\n", filename)
+			logf(LogInfo, "Created default config file: %s", filename)
 			return config, nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %v", err)
@@ -47,18 +83,25 @@ func loadConfig(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %v", err)
 	}
 
-	// Validate configuration
-	if config.ScanIntervalSeconds < 1 {
-		return nil, fmt.Errorf("scan_interval_seconds must be greater than 0")
-	}
-	if config.DNSServer == "" {
-		return nil, fmt.Errorf("dns_server cannot be empty")
+	// 验证并规范化日志级别
+	if config.LogLevel == "" {
+		config.LogLevel = LogInfo
+	} else {
+		config.LogLevel = strings.ToUpper(config.LogLevel)
+		if _, exists := logLevelWeight[config.LogLevel]; !exists {
+			logf(LogWarning, "Invalid log level '%s' in config, using default level 'INFO'", config.LogLevel)
+			config.LogLevel = LogInfo
+		}
 	}
 
+	// 更新全局配置
+	currentConfig = config
 	return config, nil
 }
 
 type PingResult struct {
+	// ID        uint       `gorm:"primary_key"`
+	gorm.Model
 	Timestamp time.Time
 	Domain    string
 	IP        string
@@ -265,8 +308,8 @@ func scanDomains(config *Config) ([]PingResult, error) {
 	var results []PingResult
 	timestamp := time.Now()
 
-	fmt.Printf("\n[%s] Starting scan...\n", timestamp.Format(time.RFC3339))
-	fmt.Println("Loaded domains:", domains)
+	logf(LogInfo, "Starting scan...")
+	logf(LogInfo, "Loaded domains: %v", domains)
 
 	for _, domain := range domains {
 		ips, err := ResolveDNS(domain, config.DNSServer)
@@ -278,14 +321,14 @@ func scanDomains(config *Config) ([]PingResult, error) {
 				Error:     fmt.Sprintf("DNS resolution failed: %v", err),
 			}
 			results = append(results, result)
-			fmt.Printf("Error resolving DNS for %s: %v\n", domain, err)
+			logf(LogError, "Error resolving DNS for %s: %v", domain, err)
 			continue
 		}
 
-		fmt.Printf("Resolved %s to %v\n", domain, ips)
+		logf(LogInfo, "Resolved %s to %v", domain, ips)
 		for _, ip := range ips {
 			isIPv6 := ip.To4() == nil
-			fmt.Printf("Pinging %s (%v) [IPv%d]...\n", domain, ip, map[bool]int{true: 6, false: 4}[isIPv6])
+			logf(LogInfo, "Pinging %s (%v) [IPv%d]...", domain, ip, map[bool]int{true: 6, false: 4}[isIPv6])
 
 			result := PingResult{
 				Timestamp: timestamp,
@@ -298,11 +341,11 @@ func scanDomains(config *Config) ([]PingResult, error) {
 			if err != nil {
 				result.Success = false
 				result.Error = err.Error()
-				fmt.Printf("Error pinging %s: %v\n", ip, err)
+				logf(LogError, "Error pinging %s: %v", ip, err)
 			} else {
 				result.Success = true
 				result.RTT = rtt
-				fmt.Printf("Ping %s (%s): time=%v\n", domain, ip, rtt.Round(time.Millisecond))
+				logf(LogInfo, "Ping %s (%s): time=%v", domain, ip, rtt.Round(time.Millisecond))
 			}
 
 			results = append(results, result)
@@ -313,30 +356,47 @@ func scanDomains(config *Config) ([]PingResult, error) {
 }
 
 func main() {
-	const (
-		configFile = "config.json"
-		csvFile    = "ping_results.csv"
-	)
+	const configFile = "config.json"
 
 	// Load configuration
 	config, err := loadConfig(configFile)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		logf(LogError, "Error loading config: %v", err)
 		return
 	}
 
+	db, err := gorm.Open(sqlite.Open("log.db"), &gorm.Config{})
+	if err != nil {
+		logf(LogError, "Failed to connect database: %v", err)
+		return
+	}
+
+	db.AutoMigrate(&PingResult{})
+
 	interval := time.Duration(config.ScanIntervalSeconds) * time.Second
-	fmt.Printf("Starting periodic domain scanner:\n")
-	fmt.Printf("- Interval: %v\n", interval)
-	fmt.Printf("- DNS Server: %s\n", config.DNSServer)
-	fmt.Printf("- Results file: %s\n", csvFile)
+	logf(LogInfo, "Starting periodic domain scanner:")
+	logf(LogInfo, "- Interval: %v", interval)
+	logf(LogInfo, "- DNS Server: %s", config.DNSServer)
+
+	// Start API server in a goroutine
+	go func() {
+		r := setupRouter(db)
+		logf(LogInfo, "Starting API server on :8080")
+		if err := r.Run(":8080"); err != nil {
+			logf(LogError, "Failed to start API server: %v", err)
+		}
+	}()
 
 	// Perform first scan immediately
 	results, err := scanDomains(config)
 	if err != nil {
-		fmt.Printf("Scan error: %v\n", err)
-	} else if err := writeResultsToCSV(results, csvFile); err != nil {
-		fmt.Printf("Failed to write results: %v\n", err)
+		logf(LogError, "Scan error: %v", err)
+	}
+
+	if result := db.Create(&results); result.Error != nil {
+		logf(LogError, "Failed to write to database: %v", result.Error)
+	} else {
+		logf(LogInfo, "Successfully wrote %d records to database", result.RowsAffected)
 	}
 
 	// Set up ticker for periodic scans
@@ -346,12 +406,14 @@ func main() {
 	for range ticker.C {
 		results, err := scanDomains(config)
 		if err != nil {
-			fmt.Printf("Scan error: %v\n", err)
+			logf(LogError, "Scan error: %v", err)
 			continue
 		}
 
-		if err := writeResultsToCSV(results, csvFile); err != nil {
-			fmt.Printf("Failed to write results: %v\n", err)
+		if result := db.Create(&results); result.Error != nil {
+			logf(LogError, "Failed to write to database: %v", result.Error)
+		} else {
+			logf(LogInfo, "Successfully wrote %d records to database", result.RowsAffected)
 		}
 	}
 }

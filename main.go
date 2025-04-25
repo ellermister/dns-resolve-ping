@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -368,6 +372,39 @@ func getDatabasePath() string {
 	return "log.db"
 }
 
+func getDNSServer() string {
+	// 如果配置文件中指定了DNS服务器，则使用配置的
+	if currentConfig != nil && currentConfig.DNSServer != "" {
+		return currentConfig.DNSServer
+	}
+
+	// 读取 resolv.conf 文件
+	resolvConfData, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		logf(LogWarning, "Failed to read resolv.conf, using default DNS 223.5.5.5: %v", err)
+		return "223.5.5.5"
+	}
+
+	// 解析 resolv.conf 内容
+	for _, line := range strings.Split(string(resolvConfData), "\n") {
+		// 去除注释和空白
+		line = strings.TrimSpace(strings.Split(line, "#")[0])
+		if line == "" {
+			continue
+		}
+
+		// 查找 nameserver 行
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "nameserver" {
+			logf(LogInfo, "Using system DNS server: %s", fields[1])
+			return fields[1]
+		}
+	}
+
+	logf(LogWarning, "No DNS servers found in resolv.conf, using default DNS 223.5.5.5")
+	return "223.5.5.5"
+}
+
 func main() {
 	const configFile = "config.json"
 
@@ -376,6 +413,11 @@ func main() {
 	if err != nil {
 		logf(LogError, "Error loading config: %v", err)
 		return
+	}
+
+	// 如果未指定DNS服务器，自动获取系统DNS
+	if config.DNSServer == "" {
+		config.DNSServer = getDNSServer()
 	}
 
 	db, err := gorm.Open(sqlite.Open(getDatabasePath()), &gorm.Config{})
@@ -391,16 +433,46 @@ func main() {
 	logf(LogInfo, "- Interval: %v", interval)
 	logf(LogInfo, "- DNS Server: %s", config.DNSServer)
 
-	// Start API server in a goroutine
+	// 创建一个context用于控制goroutine的退出
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 创建WaitGroup来等待所有goroutine完成
+	var wg sync.WaitGroup
+
+	// 设置信号处理
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// 启动API服务器
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		r := setupRouter(db)
-		logf(LogInfo, "Starting API server on :8080")
-		if err := r.Run(":8080"); err != nil {
-			logf(LogError, "Failed to start API server: %v", err)
+		server := &http.Server{
+			Addr:    ":8080",
+			Handler: r,
+		}
+
+		// 在新的goroutine中启动服务器
+		go func() {
+			logf(LogInfo, "Starting API server on :8080")
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logf(LogError, "Failed to start API server: %v", err)
+			}
+		}()
+
+		// 等待取消信号
+		<-ctx.Done()
+		// 给服务器5秒钟的优雅关闭时间
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logf(LogError, "API server shutdown error: %v", err)
 		}
 	}()
 
-	// Perform first scan immediately
+	// 执行第一次扫描
 	results, err := scanDomains(config)
 	if err != nil {
 		logf(LogError, "Scan error: %v", err)
@@ -412,21 +484,43 @@ func main() {
 		logf(LogInfo, "Successfully wrote %d records to database", result.RowsAffected)
 	}
 
-	// Set up ticker for periodic scans
+	// 设置定时器
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		results, err := scanDomains(config)
-		if err != nil {
-			logf(LogError, "Scan error: %v", err)
-			continue
-		}
+	// 主循环
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ticker.C:
+				results, err := scanDomains(config)
+				if err != nil {
+					logf(LogError, "Scan error: %v", err)
+					continue
+				}
 
-		if result := db.Create(&results); result.Error != nil {
-			logf(LogError, "Failed to write to database: %v", result.Error)
-		} else {
-			logf(LogInfo, "Successfully wrote %d records to database", result.RowsAffected)
+				if result := db.Create(&results); result.Error != nil {
+					logf(LogError, "Failed to write to database: %v", result.Error)
+				} else {
+					logf(LogInfo, "Successfully wrote %d records to database", result.RowsAffected)
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
-	}
+	}()
+
+	// 等待信号
+	sig := <-sigChan
+	logf(LogInfo, "Received signal %v, starting graceful shutdown...", sig)
+
+	// 触发所有goroutine的退出
+	cancel()
+
+	// 等待所有goroutine完成
+	wg.Wait()
+
+	logf(LogInfo, "Graceful shutdown completed")
 }

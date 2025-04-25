@@ -406,6 +406,8 @@ func getDNSServer() string {
 }
 
 func main() {
+	// fmt.Print(time.Now().UTC())
+	// os.Exit(0)
 	const configFile = "config.json"
 
 	// Load configuration

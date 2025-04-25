@@ -96,12 +96,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			start, _ := time.Parse(time.RFC3339, startTime)
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			end, _ := time.Parse(time.RFC3339, endTime)
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var stats []DomainStats
@@ -130,12 +128,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			start, _ := time.Parse(time.RFC3339, startTime)
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			end, _ := time.Parse(time.RFC3339, endTime)
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var results []struct {
@@ -145,7 +141,7 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		}
 
 		// 根据时间间隔分组，使用字符串格式
-		timeFormat := "strftime('%Y-%m-%d %H:%M:00', timestamp) as timestamp_str"
+		timeFormat := "strftime('%Y-%m-%d %H:%M:00', datetime(timestamp, 'localtime')) as timestamp_str"
 		err := query.Select(fmt.Sprintf("%s, domain, avg(rtt) as rtt", timeFormat)).
 			Group("timestamp_str, domain").
 			Order("timestamp_str").
@@ -157,9 +153,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		}
 
 		var timeSeriesData []TimeSeriesData
+		loc, _ := time.LoadLocation("Asia/Shanghai")
 		for _, r := range results {
 			// 解析时间字符串
-			timestamp, err := time.Parse("2006-01-02 15:04:05", r.TimestampStr)
+			timestamp, err := time.ParseInLocation("2006-01-02 15:04:05", r.TimestampStr, loc)
 			if err != nil {
 				continue // 跳过无效的时间格式
 			}
@@ -184,12 +181,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			start, _ := time.Parse(time.RFC3339, startTime)
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			end, _ := time.Parse(time.RFC3339, endTime)
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var results []struct {
@@ -198,7 +193,7 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			Count        int64
 		}
 
-		timeFormat := "strftime('%Y-%m-%d %H:%M:00', timestamp) as timestamp_str"
+		timeFormat := "strftime('%Y-%m-%d %H:%M:00', datetime(timestamp, 'localtime')) as timestamp_str"
 		err := query.Select(fmt.Sprintf("%s, domain, count(*) as count", timeFormat)).
 			Group("timestamp_str, domain").
 			Order("timestamp_str").
@@ -210,9 +205,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		}
 
 		var timeSeriesData []TimeSeriesData
+		loc, _ := time.LoadLocation("Asia/Shanghai")
 		for _, r := range results {
 			// 解析时间字符串
-			timestamp, err := time.Parse("2006-01-02 15:04:05", r.TimestampStr)
+			timestamp, err := time.ParseInLocation("2006-01-02 15:04:05", r.TimestampStr, loc)
 			if err != nil {
 				continue // 跳过无效的时间格式
 			}
@@ -280,12 +276,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			start, _ := time.Parse(time.RFC3339, startTime)
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			end, _ := time.Parse(time.RFC3339, endTime)
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var distribution IPDistribution
@@ -334,10 +328,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		var timeFormat string
 		if duration <= time.Hour {
 			// 1小时内，按分钟分组
-			timeFormat = "strftime('%Y-%m-%d %H:%M:00', timestamp) as timestamp_str"
+			timeFormat = "strftime('%Y-%m-%d %H:%M:00', datetime(timestamp, 'localtime')) as timestamp_str"
 		} else {
 			// 大于1小时，按小时分组
-			timeFormat = "strftime('%Y-%m-%d %H:00:00', timestamp) as timestamp_str"
+			timeFormat = "strftime('%Y-%m-%d %H:00:00', datetime(timestamp, 'localtime')) as timestamp_str"
 		}
 
 		// 构建基础查询
@@ -346,10 +340,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var results []struct {
@@ -371,8 +365,9 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 		timeSeriesData := make([]TimeSeriesData, 0)
 
 		// 转换数据
+		loc, _ := time.LoadLocation("Asia/Shanghai")
 		for _, r := range results {
-			timestamp, err := time.Parse("2006-01-02 15:04:05", r.TimestampStr)
+			timestamp, err := time.ParseInLocation("2006-01-02 15:04:05", r.TimestampStr, loc)
 			if err != nil {
 				continue
 			}
@@ -397,12 +392,10 @@ func setupRouter(db *gorm.DB) *gin.Engine {
 			query = query.Where("domain = ?", domain)
 		}
 		if startTime != "" {
-			start, _ := time.Parse(time.RFC3339, startTime)
-			query = query.Where("timestamp >= ?", start)
+			query = query.Where("datetime(timestamp) >= datetime(?)", startTime)
 		}
 		if endTime != "" {
-			end, _ := time.Parse(time.RFC3339, endTime)
-			query = query.Where("timestamp <= ?", end)
+			query = query.Where("datetime(timestamp) <= datetime(?)", endTime)
 		}
 
 		var results []struct {

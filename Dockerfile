@@ -27,9 +27,9 @@ RUN apk add --no-cache ca-certificates tzdata sqlite libcap
 # 创建非 root 用户
 RUN adduser -D -u 1000 appuser
 
-# 创建应用目录并设置权限
-RUN mkdir -p /app/static && \
-    chown -R appuser:appuser /app
+# 创建应用目录和数据目录并设置权限
+RUN mkdir -p /app/static /data && \
+    chown -R appuser:appuser /app /data
 
 # 设置工作目录
 WORKDIR /app
@@ -48,7 +48,8 @@ COPY --chown=appuser:appuser static/ ./static/
 ENV TZ=Asia/Shanghai
 ENV DOCKER_CONTAINER=true
 
-VOLUME /data
+# 声明数据卷并确保权限
+VOLUME ["/data"]
 
 # 切换到非 root 用户
 USER appuser

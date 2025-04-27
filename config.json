@@ -1,5 +1,4 @@
 {
     "scan_interval_seconds": 60,
-    "dns_server": "192.168.1.1",
     "log_level": "WARN"
 } 
